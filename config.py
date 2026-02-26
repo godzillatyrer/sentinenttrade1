@@ -10,7 +10,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- API Keys ---
-TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN", "")
+# Twitter credentials (optional — only needed if GuestClient gets rate-limited)
+TWITTER_USERNAME = os.getenv("TWITTER_USERNAME", "")
+TWITTER_EMAIL = os.getenv("TWITTER_EMAIL", "")
+TWITTER_PASSWORD = os.getenv("TWITTER_PASSWORD", "")
+TWITTER_COOKIES_FILE = os.getenv("TWITTER_COOKIES_FILE", "twitter_cookies.json")
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 BASE_RPC_URL = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
@@ -129,6 +134,31 @@ SCORING = {
     "verified_bonus": 5,
 }
 
+# --- AI / Automated Profile Detection ---
+# If the original tweet author looks like an AI/bot account, the analyzer
+# traces back to find the real person behind it and scores them instead.
+AI_PROFILE_INDICATORS = {
+    # Bio keywords that suggest automation
+    "bio_keywords": ["ai agent", "bot", "automated", "autonomous", "ai persona",
+                     "artificial intelligence agent", "virtual", "digital being"],
+    # Name keywords
+    "name_keywords": ["ai", "bot", "agent", "gpt"],
+    # If followers below this AND bio matches AI keywords, treat as automated
+    "max_followers": 500,
+    # Patterns to find the real person behind an AI account (checked in bio)
+    "parent_patterns": [
+        r"by\s+@(\w+)",
+        r"created\s+by\s+@(\w+)",
+        r"built\s+by\s+@(\w+)",
+        r"powered\s+by\s+@(\w+)",
+        r"from\s+@(\w+)",
+        r"made\s+by\s+@(\w+)",
+        r"run\s+by\s+@(\w+)",
+        r"managed\s+by\s+@(\w+)",
+        r"@(\w+)['\u2019]s\s+(?:ai|bot|agent)",
+    ],
+}
+
 # --- Polling Intervals ---
-TWITTER_POLL_INTERVAL_SECONDS = 120  # How often to check @bankrbot tweets (2 min)
+TWITTER_POLL_INTERVAL_SECONDS = 300  # How often to check @bankrbot tweets (5 min)
 CHAIN_POLL_INTERVAL_SECONDS = 5      # How often to check for new blocks on Base

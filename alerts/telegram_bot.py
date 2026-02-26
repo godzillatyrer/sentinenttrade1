@@ -51,7 +51,7 @@ class TelegramAlerter:
         ticker = deployment.get("ticker", "???")
         ca = deployment.get("contract_address", "N/A")
         source = deployment.get("source", "unknown")
-        username = deployment.get("triggering_username") or profile_report.username
+        original_author = deployment.get("original_author_username") or profile_report.username
         token_name = deployment.get("token_name", "")
 
         lines = [
@@ -61,13 +61,21 @@ class TelegramAlerter:
             f"<b>CA:</b> <code>{ca}</code>",
             f"<b>Source:</b> {source.upper()}",
             "",
-            f"━━━ Deployer Profile ━━━",
-            f"<b>User:</b> @{username}",
+            f"━━━ Original Author ━━━",
+            f"<b>User:</b> @{original_author}",
             f"<b>Name:</b> {profile_report.name}",
             f"<b>Bio:</b> {profile_report.bio[:200]}{'...' if len(profile_report.bio) > 200 else ''}",
             f"<b>Followers:</b> {profile_report.followers_count:,}",
             f"<b>Influence Score:</b> {profile_report.score}/100",
         ]
+
+        # AI profile detection
+        if getattr(profile_report, 'is_automated', False):
+            lines.append(f"⚠️ <b>AI/Bot Profile Detected</b>")
+            parent = getattr(profile_report, 'parent_username', '')
+            if parent:
+                lines.append(f"<b>Real Person Behind:</b> @{parent}")
+                lines.append(f"<b>Parent Score:</b> {getattr(profile_report, 'parent_score', 0)}/100")
 
         # Score breakdown
         if profile_report.score_breakdown:
@@ -101,7 +109,7 @@ class TelegramAlerter:
         if deployment.get("original_tweet_url"):
             lines.append(f"🔗 <a href='{deployment['original_tweet_url']}'>Original Tweet</a>")
 
-        lines.append(f"👤 <a href='https://x.com/{username}'>Deployer Profile</a>")
+        lines.append(f"👤 <a href='https://x.com/{original_author}'>Original Author Profile</a>")
 
         # On-chain details if available
         if deployment.get("basescan_tx_url"):
