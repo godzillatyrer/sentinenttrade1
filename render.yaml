@@ -8,10 +8,6 @@ services:
     envVars:
       - key: TWITTER_BEARER_TOKEN
         sync: false
-      - key: TWITTER_API_KEY
-        sync: false
-      - key: TWITTER_API_SECRET
-        sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_CHAT_ID
