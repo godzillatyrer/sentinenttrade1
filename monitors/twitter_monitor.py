@@ -136,6 +136,7 @@ class TwitterMonitor:
 
     async def poll(self):
         """Single poll cycle: fetch recent @bankrbot tweets and check for deployments."""
+        logger.info("Polling @bankrbot for new tweets...")
         await self._ensure_activated()
 
         user_id = await self._get_bankrbot_user_id()
@@ -157,8 +158,10 @@ class TwitterMonitor:
             return
 
         if not tweets:
+            logger.info("No tweets returned")
             return
 
+        logger.info(f"Fetched {len(tweets)} tweets, checking for deployments...")
         for tweet in tweets:
             tweet_id = str(tweet.id)
             if tweet_id in self._seen_tweet_ids:

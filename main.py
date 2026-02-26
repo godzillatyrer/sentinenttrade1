@@ -23,22 +23,28 @@ import os
 import sys
 import threading
 
-import uvicorn
-
-import config
-import database
-from monitors.twitter_monitor import TwitterMonitor
-from monitors.chain_monitor import ChainMonitor
-from analyzers.profile_analyzer import ProfileAnalyzer
-from alerts.telegram_bot import TelegramAlerter
-from web_server import app
-
+# Configure logging BEFORE any third-party imports so crashes are visible
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout,
 )
 logger = logging.getLogger("bankrbot-alerts")
+logger.info("Starting BankrBot Alert System...")
+
+try:
+    import uvicorn
+    import config
+    import database
+    from monitors.twitter_monitor import TwitterMonitor
+    from monitors.chain_monitor import ChainMonitor
+    from analyzers.profile_analyzer import ProfileAnalyzer
+    from alerts.telegram_bot import TelegramAlerter
+    from web_server import app
+except Exception as e:
+    logger.error(f"Failed to import modules: {e}")
+    sys.exit(1)
 
 # Shared state to deduplicate across monitors
 seen_contracts = set()
