@@ -10,7 +10,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+import config
 import database
+from alerts.telegram_bot import TelegramAlerter
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,36 @@ async def api_deployments(limit: int = 50, offset: int = 0, alerted_only: bool =
                 except (json.JSONDecodeError, TypeError):
                     pass
     return JSONResponse(content=rows)
+
+
+@app.post("/api/test-telegram")
+async def test_telegram():
+    """Send a test message to Telegram to verify the bot is working."""
+    if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
+        return JSONResponse(
+            content={"success": False, "error": "Telegram bot token or chat ID not configured"},
+            status_code=400,
+        )
+    try:
+        alerter = TelegramAlerter()
+        from telegram.constants import ParseMode
+        await alerter.bot.send_message(
+            chat_id=alerter.chat_id,
+            text=(
+                "🧪 <b>Telegram Test</b>\n\n"
+                "Your BankrBot Alert System is connected!\n"
+                f"Influence threshold: {config.INFLUENCE_THRESHOLD}/100\n"
+                f"Twitter poll: every {config.TWITTER_POLL_INTERVAL_SECONDS}s"
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+        return JSONResponse(content={"success": True, "message": "Test message sent!"})
+    except Exception as e:
+        logger.error(f"Telegram test failed: {e}")
+        return JSONResponse(
+            content={"success": False, "error": str(e)},
+            status_code=500,
+        )
 
 
 @app.get("/api/profile/{username}")

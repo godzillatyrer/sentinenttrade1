@@ -105,6 +105,11 @@
 
     .controls button:hover { background: #222240; border-color: #444; }
     .controls button.active { background: #00ff88; color: #000; border-color: #00ff88; font-weight: 600; }
+    .controls button.telegram { background: #1a1a2e; border-color: #0088cc; color: #0088cc; }
+    .controls button.telegram:hover { background: #0088cc; color: #fff; }
+    .controls button.telegram.sending { opacity: 0.6; pointer-events: none; }
+    .controls button.telegram.success { background: #00ff88; color: #000; border-color: #00ff88; }
+    .controls button.telegram.fail { background: #ff4466; color: #fff; border-color: #ff4466; }
 
     .feed {
       padding: 0 32px 32px;
@@ -293,6 +298,7 @@
     <button class="active" onclick="setFilter('all')">All</button>
     <button onclick="setFilter('alerted')">Alerted Only</button>
     <button onclick="refresh()">Refresh</button>
+    <button class="telegram" id="btn-test-tg" onclick="testTelegram()">Test Telegram</button>
   </div>
 
   <div class="feed" id="feed"></div>
@@ -431,6 +437,36 @@
     function refresh() {
       loadStats();
       loadDeployments();
+    }
+
+    async function testTelegram() {
+      const btn = document.getElementById('btn-test-tg');
+      btn.textContent = 'Sending...';
+      btn.classList.add('sending');
+      btn.classList.remove('success', 'fail');
+      try {
+        const res = await fetch('/api/test-telegram', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          btn.textContent = 'Sent!';
+          btn.classList.remove('sending');
+          btn.classList.add('success');
+        } else {
+          btn.textContent = 'Failed';
+          btn.classList.remove('sending');
+          btn.classList.add('fail');
+          console.error('Telegram test error:', data.error);
+        }
+      } catch (e) {
+        btn.textContent = 'Failed';
+        btn.classList.remove('sending');
+        btn.classList.add('fail');
+        console.error('Telegram test error:', e);
+      }
+      setTimeout(() => {
+        btn.textContent = 'Test Telegram';
+        btn.classList.remove('success', 'fail');
+      }, 3000);
     }
 
     // Initial load
