@@ -4,9 +4,10 @@ BankrBot Alert System — Main Orchestrator.
 Runs the Twitter monitor, Base chain monitor, and web dashboard concurrently.
 When a deployment is detected from either source:
   1. Saves it to the database
-  2. Analyzes the deployer's Twitter profile for influence
-  3. If the influence score passes the threshold, sends a Telegram alert
-  4. All data is viewable on the web dashboard at http://localhost:8000
+  2. Traces back to the original tweet author (not the person who tagged bankrbot)
+  3. If the author looks like an AI/bot, finds the real person behind it
+  4. Analyzes the profile for influence — sends Telegram alert if above threshold
+  5. All data is viewable on the web dashboard at http://localhost:8000
 
 Usage:
   1. Copy .env.example to .env and fill in your API keys
@@ -61,30 +62,35 @@ async def handle_deployment(deployment: dict, analyzer: ProfileAnalyzer, alerter
     deployment_id = await database.save_deployment(deployment)
     logger.info(f"Saved deployment #{deployment_id} to database")
 
-    # Determine who to analyze
-    username = deployment.get("triggering_username") or deployment.get("original_author_username")
+    # Determine who to analyze — we want the ORIGINAL tweet author (the person
+    # whose content inspired the coin), NOT the person who tagged bankrbot
+    username = deployment.get("original_author_username")
 
     if not username:
-        logger.info("No triggering username found for deployment, skipping analysis")
-        await database.save_alert(deployment_id, 0, False, 0, "No triggering user found")
+        logger.info("No original author found for deployment, skipping analysis")
+        await database.save_alert(deployment_id, 0, False, 0, "No original author found")
         return
 
-    # Analyze profile
-    logger.info(f"Analyzing profile: @{username}")
-    report = analyzer.analyze(username)
+    # Analyze profile (handles AI/bot detection and parent account tracing)
+    logger.info(f"Analyzing original author: @{username}")
+    report = await analyzer.analyze(username)
 
     # Save profile to database
     profile_id = await database.save_profile(report)
 
+    extra = ""
+    if report.is_automated and report.parent_username:
+        extra = f" (AI profile, real person: @{report.parent_username})"
+
     if report.passes_threshold:
         logger.info(
-            f"ALERT: @{username} scored {report.score}/{config.INFLUENCE_THRESHOLD} — sending Telegram alert"
+            f"ALERT: @{username} scored {report.score}/{config.INFLUENCE_THRESHOLD}{extra} — sending Telegram alert"
         )
         await database.save_alert(deployment_id, profile_id, True, report.score, "Passes influence threshold")
         await alerter.send_alert(deployment, report)
     else:
         logger.info(
-            f"SKIP: @{username} scored {report.score}/{config.INFLUENCE_THRESHOLD} — below threshold"
+            f"SKIP: @{username} scored {report.score}/{config.INFLUENCE_THRESHOLD}{extra} — below threshold"
         )
         await database.save_alert(deployment_id, profile_id, False, report.score, "Below influence threshold")
 
@@ -92,8 +98,6 @@ async def handle_deployment(deployment: dict, analyzer: ProfileAnalyzer, alerter
 def validate_config():
     """Check that required config values are set."""
     errors = []
-    if not config.TWITTER_BEARER_TOKEN:
-        errors.append("TWITTER_BEARER_TOKEN is not set")
     if not config.TELEGRAM_BOT_TOKEN:
         errors.append("TELEGRAM_BOT_TOKEN is not set")
     if not config.TELEGRAM_CHAT_ID:
