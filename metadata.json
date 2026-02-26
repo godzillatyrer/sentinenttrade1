@@ -1,5 +1,0 @@
-{
-  "name": "SentientTrader AI",
-  "description": "Real-time crypto market scanner analyzing top 50 Binance perpetuals using Gemini AI to generate trading signals with Entry, TP, and SL.",
-  "requestFramePermissions": []
-}
