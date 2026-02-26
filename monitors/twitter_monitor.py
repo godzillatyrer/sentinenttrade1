@@ -2,7 +2,7 @@
 Twitter Monitor for BankrBot.
 
 Polls @bankrbot's recent tweets for token deployment announcements.
-Uses twikit GuestClient (free, no API key, $0 cost) instead of the paid Twitter API.
+Uses twikit's authenticated Client (requires a Twitter/X account login).
 
 When a deployment is detected, traces back to the ORIGINAL tweet author —
 the person whose content inspired the coin, not the random person who tagged bankrbot.
@@ -13,7 +13,7 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 
-from twikit.guest import GuestClient
+from twikit import Client
 
 import config
 
@@ -31,29 +31,48 @@ class TwitterMonitor:
         Args:
             on_deployment_detected: async callback(deployment_info: dict)
         """
-        self.client = GuestClient()
+        self.client = Client('en-US')
         self.on_deployment_detected = on_deployment_detected
         self._seen_tweet_ids = set()
         self._bankrbot_user_id = None
-        self._activated = False
+        self._logged_in = False
 
-    async def _ensure_activated(self):
-        """Activate the guest client (generates a guest token)."""
-        if not self._activated:
-            try:
-                await self.client.activate()
-                self._activated = True
-                logger.info("twikit GuestClient activated")
-            except Exception as e:
-                logger.error(f"Failed to activate GuestClient: {e}")
-                raise
+    async def _ensure_logged_in(self):
+        """Log in to Twitter/X using credentials or saved cookies."""
+        if self._logged_in:
+            return
+
+        # Try loading saved cookies first
+        try:
+            self.client.load_cookies(config.TWITTER_COOKIES_FILE)
+            self._logged_in = True
+            logger.info("Loaded saved Twitter session from cookies")
+            return
+        except Exception:
+            pass  # No saved cookies or expired, do fresh login
+
+        if not config.TWITTER_USERNAME or not config.TWITTER_PASSWORD:
+            raise RuntimeError(
+                "Twitter credentials required: set TWITTER_USERNAME, TWITTER_EMAIL, "
+                "and TWITTER_PASSWORD in your .env file. The free GuestClient no longer "
+                "works — Twitter removed the guest activation endpoint."
+            )
+
+        logger.info(f"Logging in to Twitter as @{config.TWITTER_USERNAME}...")
+        await self.client.login(
+            auth_info_1=config.TWITTER_USERNAME,
+            auth_info_2=config.TWITTER_EMAIL,
+            password=config.TWITTER_PASSWORD,
+            cookies_file=config.TWITTER_COOKIES_FILE,
+        )
+        self._logged_in = True
+        logger.info("Twitter login successful, cookies saved")
 
     async def _get_bankrbot_user_id(self):
         """Resolve @bankrbot's user ID (cached after first lookup)."""
         if self._bankrbot_user_id:
             return self._bankrbot_user_id
 
-        await self._ensure_activated()
         try:
             user = await self.client.get_user_by_screen_name(config.BANKRBOT_USERNAME)
             if user:
@@ -137,7 +156,7 @@ class TwitterMonitor:
     async def poll(self):
         """Single poll cycle: fetch recent @bankrbot tweets and check for deployments."""
         logger.info("Polling @bankrbot for new tweets...")
-        await self._ensure_activated()
+        await self._ensure_logged_in()
 
         user_id = await self._get_bankrbot_user_id()
         if not user_id:
@@ -149,12 +168,15 @@ class TwitterMonitor:
         except Exception as e:
             error_str = str(e).lower()
             if 'rate' in error_str or '429' in error_str:
-                logger.warning("Rate limited, re-activating guest token and backing off")
-                self._activated = False
+                logger.warning("Rate limited, backing off 60s")
                 await asyncio.sleep(60)
                 return
+            if 'unauthorized' in error_str or '401' in error_str or 'forbidden' in error_str:
+                logger.warning("Session expired, will re-login on next poll")
+                self._logged_in = False
+                return
             logger.error(f"Error fetching tweets: {e}")
-            self._activated = False
+            self._logged_in = False
             return
 
         if not tweets:
@@ -190,11 +212,11 @@ class TwitterMonitor:
 
     async def run(self):
         """Continuously poll for new deployments."""
-        logger.info("Twitter monitor started (twikit GuestClient — free, no API key)")
+        logger.info("Twitter monitor started (authenticated twikit Client)")
         while True:
             try:
                 await self.poll()
             except Exception as e:
                 logger.error(f"Twitter monitor error: {e}")
-                self._activated = False  # re-activate on next poll
+                self._logged_in = False  # re-login on next poll
             await asyncio.sleep(config.TWITTER_POLL_INTERVAL_SECONDS)

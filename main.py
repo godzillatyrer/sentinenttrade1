@@ -108,6 +108,11 @@ def validate_config():
         errors.append("TELEGRAM_BOT_TOKEN is not set")
     if not config.TELEGRAM_CHAT_ID:
         errors.append("TELEGRAM_CHAT_ID is not set")
+    if not config.TWITTER_USERNAME or not config.TWITTER_PASSWORD:
+        errors.append(
+            "TWITTER_USERNAME and TWITTER_PASSWORD are required "
+            "(GuestClient no longer works — Twitter removed the endpoint)"
+        )
 
     if errors:
         for err in errors:

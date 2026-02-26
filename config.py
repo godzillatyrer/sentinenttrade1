@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- API Keys ---
-# Twitter credentials (optional — only needed if GuestClient gets rate-limited)
+# Twitter credentials (REQUIRED — needed to log in and poll @bankrbot tweets)
 TWITTER_USERNAME = os.getenv("TWITTER_USERNAME", "")
 TWITTER_EMAIL = os.getenv("TWITTER_EMAIL", "")
 TWITTER_PASSWORD = os.getenv("TWITTER_PASSWORD", "")
