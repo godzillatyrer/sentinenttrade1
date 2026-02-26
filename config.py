@@ -160,5 +160,5 @@ AI_PROFILE_INDICATORS = {
 }
 
 # --- Polling Intervals ---
-TWITTER_POLL_INTERVAL_SECONDS = 300  # How often to check @bankrbot tweets (5 min)
+TWITTER_POLL_INTERVAL_SECONDS = 120  # How often to check @bankrbot tweets (2 min)
 CHAIN_POLL_INTERVAL_SECONDS = 5      # How often to check for new blocks on Base
