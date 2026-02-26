@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: bankrbot-alerts
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: TWITTER_BEARER_TOKEN
+        sync: false
+      - key: TWITTER_API_KEY
+        sync: false
+      - key: TWITTER_API_SECRET
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: BASE_RPC_URL
+        value: https://mainnet.base.org
+      - key: BASESCAN_API_KEY
+        sync: false
+      - key: INFLUENCE_THRESHOLD
+        value: "40"
+      - key: PORT
+        value: "8000"
