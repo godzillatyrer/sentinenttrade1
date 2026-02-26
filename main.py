@@ -1,27 +1,35 @@
 """
 BankrBot Alert System — Main Orchestrator.
 
-Runs both the Twitter monitor and Base chain monitor concurrently.
+Runs the Twitter monitor, Base chain monitor, and web dashboard concurrently.
 When a deployment is detected from either source:
-  1. Identifies who triggered it
-  2. Analyzes their Twitter profile for influence (followers, key followers, bio)
+  1. Saves it to the database
+  2. Analyzes the deployer's Twitter profile for influence
   3. If the influence score passes the threshold, sends a Telegram alert
+  4. All data is viewable on the web dashboard at http://localhost:8000
 
 Usage:
   1. Copy .env.example to .env and fill in your API keys
   2. pip install -r requirements.txt
   3. python main.py
+
+The dashboard will be available at http://localhost:8000
 """
 
 import asyncio
 import logging
 import sys
+import threading
+
+import uvicorn
 
 import config
+import database
 from monitors.twitter_monitor import TwitterMonitor
 from monitors.chain_monitor import ChainMonitor
 from analyzers.profile_analyzer import ProfileAnalyzer
 from alerts.telegram_bot import TelegramAlerter
+from web_server import app
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,7 +45,7 @@ seen_contracts = set()
 async def handle_deployment(deployment: dict, analyzer: ProfileAnalyzer, alerter: TelegramAlerter):
     """
     Central handler called by both Twitter and chain monitors.
-    Analyzes the deployer profile and sends alert if influential.
+    Saves to DB, analyzes deployer profile, and sends alert if influential.
     """
     ca = deployment.get("contract_address")
 
@@ -48,26 +56,36 @@ async def handle_deployment(deployment: dict, analyzer: ProfileAnalyzer, alerter
     if ca:
         seen_contracts.add(ca)
 
+    # Save deployment to database
+    deployment_id = await database.save_deployment(deployment)
+    logger.info(f"Saved deployment #{deployment_id} to database")
+
     # Determine who to analyze
     username = deployment.get("triggering_username") or deployment.get("original_author_username")
 
     if not username:
-        logger.info(f"No triggering username found for deployment, skipping analysis")
+        logger.info("No triggering username found for deployment, skipping analysis")
+        await database.save_alert(deployment_id, 0, False, 0, "No triggering user found")
         return
 
     # Analyze profile
     logger.info(f"Analyzing profile: @{username}")
     report = analyzer.analyze(username)
 
+    # Save profile to database
+    profile_id = await database.save_profile(report)
+
     if report.passes_threshold:
         logger.info(
             f"ALERT: @{username} scored {report.score}/{config.INFLUENCE_THRESHOLD} — sending Telegram alert"
         )
+        await database.save_alert(deployment_id, profile_id, True, report.score, "Passes influence threshold")
         await alerter.send_alert(deployment, report)
     else:
         logger.info(
             f"SKIP: @{username} scored {report.score}/{config.INFLUENCE_THRESHOLD} — below threshold"
         )
+        await database.save_alert(deployment_id, profile_id, False, report.score, "Below influence threshold")
 
 
 def validate_config():
@@ -93,11 +111,24 @@ def validate_config():
         )
 
 
+def start_web_server():
+    """Run the FastAPI web server in a separate thread."""
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
+
+
 async def main():
     validate_config()
 
+    # Initialize database
+    await database.init_db()
+
     analyzer = ProfileAnalyzer()
     alerter = TelegramAlerter()
+
+    # Start web dashboard in background thread
+    web_thread = threading.Thread(target=start_web_server, daemon=True)
+    web_thread.start()
+    logger.info("Web dashboard running at http://localhost:8000")
 
     # Send startup notification
     await alerter.send_startup_message()
