@@ -4,6 +4,7 @@ FastAPI web server — serves the dashboard and API endpoints.
 
 import json
 import logging
+from collections import deque
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -15,6 +16,24 @@ import database
 from alerts.telegram_bot import TelegramAlerter
 
 logger = logging.getLogger(__name__)
+
+# In-memory ring buffer for recent logs (viewable from dashboard)
+log_buffer = deque(maxlen=200)
+
+
+class DashboardLogHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            log_buffer.append(self.format(record))
+        except Exception:
+            pass
+
+
+_dashboard_handler = DashboardLogHandler()
+_dashboard_handler.setFormatter(
+    logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S")
+)
+logging.getLogger().addHandler(_dashboard_handler)
 
 app = FastAPI(title="BankrBot Alert Dashboard")
 
@@ -88,6 +107,12 @@ async def test_telegram():
             content={"success": False, "error": str(e)},
             status_code=500,
         )
+
+
+@app.get("/api/logs")
+async def api_logs():
+    """Return recent application logs for the dashboard."""
+    return JSONResponse(content={"logs": list(log_buffer)})
 
 
 @app.get("/api/profile/{username}")
