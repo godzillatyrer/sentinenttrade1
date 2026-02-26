@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BankrBot Alert Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      background: #0a0a0f;
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+      border-bottom: 1px solid #2a2a3e;
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .header h1 {
+      font-size: 20px;
+      color: #00ff88;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+
+    .header .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #888;
+    }
+
+    .header .status .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #00ff88;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      padding: 24px 32px;
+    }
+
+    .stat-card {
+      background: #12121e;
+      border: 1px solid #1e1e32;
+      border-radius: 10px;
+      padding: 20px;
+    }
+
+    .stat-card .label {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #666;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+
+    .stat-card .value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .stat-card .value.green { color: #00ff88; }
+    .stat-card .value.yellow { color: #ffd700; }
+    .stat-card .value.red { color: #ff4466; }
+    .stat-card .value.blue { color: #4488ff; }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 32px 16px;
+    }
+
+    .controls button {
+      background: #1a1a2e;
+      border: 1px solid #2a2a3e;
+      color: #ccc;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .controls button:hover { background: #222240; border-color: #444; }
+    .controls button.active { background: #00ff88; color: #000; border-color: #00ff88; font-weight: 600; }
+
+    .feed {
+      padding: 0 32px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .deployment-card {
+      background: #12121e;
+      border: 1px solid #1e1e32;
+      border-radius: 10px;
+      padding: 20px;
+      transition: border-color 0.2s;
+    }
+
+    .deployment-card:hover { border-color: #333; }
+    .deployment-card.alerted { border-left: 3px solid #00ff88; }
+    .deployment-card.skipped { border-left: 3px solid #444; }
+
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+
+    .card-top .ticker {
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .card-top .ticker span { color: #00ff88; }
+
+    .card-top .badge {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .badge.alert { background: rgba(0,255,136,0.15); color: #00ff88; }
+    .badge.skip { background: rgba(100,100,100,0.2); color: #666; }
+
+    .card-row {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .card-row .field {
+      color: #666;
+    }
+
+    .card-row .val {
+      color: #ccc;
+    }
+
+    .card-row .val.ca {
+      color: #4488ff;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .card-row .val.ca:hover { text-decoration: underline; }
+
+    .score-bar {
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .score-bar .track {
+      flex: 1;
+      height: 6px;
+      background: #1a1a2e;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .score-bar .fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.5s ease;
+    }
+
+    .score-bar .score-num {
+      font-size: 14px;
+      font-weight: 700;
+      min-width: 40px;
+      text-align: right;
+    }
+
+    .profile-details {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #1a1a2e;
+      font-size: 12px;
+      color: #888;
+    }
+
+    .profile-details .tags {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+
+    .profile-details .tag {
+      background: rgba(68,136,255,0.1);
+      color: #4488ff;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+    }
+
+    .profile-details .tag.follower {
+      background: rgba(0,255,136,0.1);
+      color: #00ff88;
+    }
+
+    .links {
+      margin-top: 10px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .links a {
+      color: #4488ff;
+      text-decoration: none;
+      font-size: 12px;
+    }
+
+    .links a:hover { text-decoration: underline; }
+
+    .empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: #444;
+      font-size: 14px;
+    }
+
+    .empty .big { font-size: 48px; margin-bottom: 16px; }
+
+    @media (max-width: 768px) {
+      .stats-bar { grid-template-columns: repeat(2, 1fr); }
+      .header, .stats-bar, .controls, .feed { padding-left: 16px; padding-right: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>BANKRBOT ALERTS</h1>
+    <div class="status">
+      <div class="dot"></div>
+      <span>Monitoring live</span>
+    </div>
+  </div>
+
+  <div class="stats-bar" id="stats">
+    <div class="stat-card">
+      <div class="label">Total Deployments</div>
+      <div class="value blue" id="stat-total">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Alerts Sent</div>
+      <div class="value green" id="stat-alerts">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Skipped</div>
+      <div class="value red" id="stat-skipped">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Avg Influence Score</div>
+      <div class="value yellow" id="stat-avg">-</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="active" onclick="setFilter('all')">All</button>
+    <button onclick="setFilter('alerted')">Alerted Only</button>
+    <button onclick="refresh()">Refresh</button>
+  </div>
+
+  <div class="feed" id="feed"></div>
+
+  <script>
+    let currentFilter = 'all';
+
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/stats');
+        const data = await res.json();
+        document.getElementById('stat-total').textContent = data.total_deployments;
+        document.getElementById('stat-alerts').textContent = data.alerts_sent;
+        document.getElementById('stat-skipped').textContent = data.skipped;
+        document.getElementById('stat-avg').textContent = data.avg_influence_score;
+      } catch (e) {
+        console.error('Failed to load stats:', e);
+      }
+    }
+
+    async function loadDeployments() {
+      try {
+        const alertedOnly = currentFilter === 'alerted';
+        const res = await fetch(`/api/deployments?limit=100&alerted_only=${alertedOnly}`);
+        const data = await res.json();
+        renderFeed(data);
+      } catch (e) {
+        console.error('Failed to load deployments:', e);
+      }
+    }
+
+    function getScoreColor(score) {
+      if (score >= 70) return '#00ff88';
+      if (score >= 40) return '#ffd700';
+      return '#ff4466';
+    }
+
+    function renderFeed(deployments) {
+      const feed = document.getElementById('feed');
+
+      if (!deployments.length) {
+        feed.innerHTML = `
+          <div class="empty">
+            <div class="big">📡</div>
+            <div>No deployments detected yet.</div>
+            <div style="margin-top:8px;color:#555">Monitoring @bankrbot for new token launches...</div>
+          </div>`;
+        return;
+      }
+
+      feed.innerHTML = deployments.map(d => {
+        const score = d.score || 0;
+        const alerted = d.alerted === 1;
+        const ca = d.contract_address || 'N/A';
+        const ticker = d.ticker || '???';
+        const username = d.triggering_username || 'unknown';
+        const source = (d.source || 'unknown').toUpperCase();
+        const followers = d.profile_followers ? d.profile_followers.toLocaleString() : '?';
+        const bio = d.profile_bio || '';
+        const keyFollowers = d.key_followers || [];
+        const bioTags = d.bio_keyword_matches || [];
+        const breakdown = d.score_breakdown || {};
+        const scoreColor = getScoreColor(score);
+        const time = d.detected_at ? new Date(d.detected_at).toLocaleString() : '';
+
+        return `
+          <div class="deployment-card ${alerted ? 'alerted' : 'skipped'}">
+            <div class="card-top">
+              <div class="ticker"><span>$</span>${ticker}</div>
+              <div class="badge ${alerted ? 'alert' : 'skip'}">${alerted ? 'ALERTED' : 'SKIPPED'}</div>
+            </div>
+
+            <div class="card-row">
+              <span class="field">CA:</span>
+              <span class="val ca" onclick="navigator.clipboard.writeText('${ca}')" title="Click to copy">${ca}</span>
+            </div>
+
+            <div class="card-row">
+              <span class="field">Deployer:</span>
+              <span class="val">@${username}</span>
+              <span class="field" style="margin-left:auto">Followers:</span>
+              <span class="val">${followers}</span>
+              <span class="field">Source:</span>
+              <span class="val">${source}</span>
+            </div>
+
+            <div class="card-row">
+              <span class="field">Time:</span>
+              <span class="val">${time}</span>
+            </div>
+
+            ${bio ? `<div class="card-row"><span class="field">Bio:</span><span class="val">${bio.substring(0, 200)}</span></div>` : ''}
+
+            <div class="score-bar">
+              <div class="track">
+                <div class="fill" style="width:${score}%;background:${scoreColor}"></div>
+              </div>
+              <div class="score-num" style="color:${scoreColor}">${score}</div>
+            </div>
+
+            ${(keyFollowers.length || bioTags.length) ? `
+              <div class="profile-details">
+                ${keyFollowers.length ? `
+                  <div>Followed by:</div>
+                  <div class="tags">${keyFollowers.map(f => `<span class="tag follower">@${f}</span>`).join('')}</div>
+                ` : ''}
+                ${bioTags.length ? `
+                  <div style="margin-top:6px">Bio matches:</div>
+                  <div class="tags">${bioTags.map(t => `<span class="tag">${t}</span>`).join('')}</div>
+                ` : ''}
+              </div>
+            ` : ''}
+
+            <div class="links">
+              ${ca !== 'N/A' ? `
+                <a href="https://basescan.org/address/${ca}" target="_blank">Basescan</a>
+                <a href="https://dexscreener.com/base/${ca}" target="_blank">DexScreener</a>
+                <a href="https://app.uniswap.org/swap?chain=base&outputCurrency=${ca}" target="_blank">Uniswap</a>
+              ` : ''}
+              <a href="https://x.com/${username}" target="_blank">@${username}</a>
+              ${d.tweet_url ? `<a href="${d.tweet_url}" target="_blank">Tweet</a>` : ''}
+              ${d.original_tweet_url ? `<a href="${d.original_tweet_url}" target="_blank">Original</a>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function setFilter(filter) {
+      currentFilter = filter;
+      document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+      loadDeployments();
+    }
+
+    function refresh() {
+      loadStats();
+      loadDeployments();
+    }
+
+    // Initial load
+    loadStats();
+    loadDeployments();
+
+    // Auto-refresh every 15 seconds
+    setInterval(refresh, 15000);
+  </script>
+</body>
+</html>
