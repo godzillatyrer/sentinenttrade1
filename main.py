@@ -18,6 +18,7 @@ The dashboard will be available at http://localhost:8000
 
 import asyncio
 import logging
+import os
 import sys
 import threading
 
@@ -113,7 +114,8 @@ def validate_config():
 
 def start_web_server():
     """Run the FastAPI web server in a separate thread."""
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
 
 
 async def main():
@@ -126,9 +128,10 @@ async def main():
     alerter = TelegramAlerter()
 
     # Start web dashboard in background thread
+    port = int(os.getenv("PORT", 8000))
     web_thread = threading.Thread(target=start_web_server, daemon=True)
     web_thread.start()
-    logger.info("Web dashboard running at http://localhost:8000")
+    logger.info(f"Web dashboard running on port {port}")
 
     # Send startup notification
     await alerter.send_startup_message()

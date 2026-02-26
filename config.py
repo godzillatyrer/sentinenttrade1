@@ -132,5 +132,5 @@ SCORING = {
 }
 
 # --- Polling Intervals ---
-TWITTER_POLL_INTERVAL_SECONDS = 30   # How often to check @bankrbot tweets
+TWITTER_POLL_INTERVAL_SECONDS = 120  # How often to check @bankrbot tweets (2 min)
 CHAIN_POLL_INTERVAL_SECONDS = 5      # How often to check for new blocks on Base
