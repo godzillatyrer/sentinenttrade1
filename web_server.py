@@ -22,6 +22,13 @@ static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint for Railway."""
+    stats = await database.get_stats()
+    return JSONResponse(content={"status": "ok", "stats": stats})
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     """Serve the main dashboard page."""
