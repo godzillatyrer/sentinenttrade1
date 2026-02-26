@@ -10,11 +10,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- API Keys ---
-# Twitter credentials (REQUIRED — needed to log in and poll @bankrbot tweets)
-TWITTER_USERNAME = os.getenv("TWITTER_USERNAME", "")
-TWITTER_EMAIL = os.getenv("TWITTER_EMAIL", "")
-TWITTER_PASSWORD = os.getenv("TWITTER_PASSWORD", "")
-TWITTER_COOKIES_FILE = os.getenv("TWITTER_COOKIES_FILE", "twitter_cookies.json")
+# SocialData API key (REQUIRED — used to poll @bankrbot tweets)
+# Sign up at https://socialdata.tools and add credit ($10 lasts months)
+SOCIALDATA_API_KEY = os.getenv("SOCIALDATA_API_KEY", "")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
