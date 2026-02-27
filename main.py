@@ -108,6 +108,8 @@ def validate_config():
         errors.append("TELEGRAM_BOT_TOKEN is not set")
     if not config.TELEGRAM_CHAT_ID:
         errors.append("TELEGRAM_CHAT_ID is not set")
+    if not config.SOCIALDATA_API_KEY:
+        errors.append("SOCIALDATA_API_KEY is not set (sign up at socialdata.tools)")
 
     if errors:
         for err in errors:

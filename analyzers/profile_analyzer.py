@@ -1,7 +1,7 @@
 """
 Profile Influence Analyzer.
 
-Fetches a Twitter user's profile via twikit (free, no API key) and computes
+Fetches a Twitter user's profile via the SocialData API and computes
 an influence score (0-100) based on:
 - Follower count
 - Bio keywords (AI, developer, crypto, company affiliations)
@@ -17,12 +17,15 @@ scores them instead.
 import re
 import logging
 from dataclasses import dataclass, field
+from urllib.parse import quote
 
-from twikit.guest import GuestClient
+import aiohttp
 
 import config
 
 logger = logging.getLogger(__name__)
+
+SOCIALDATA_BASE = "https://api.socialdata.tools"
 
 
 @dataclass
@@ -46,19 +49,38 @@ class ProfileReport:
 
 class ProfileAnalyzer:
     def __init__(self):
-        self.client = GuestClient()
-        self._activated = False
         self._cache = {}
+        self._session = None
 
-    async def _ensure_activated(self):
-        """Activate the guest client."""
-        if not self._activated:
-            try:
-                await self.client.activate()
-                self._activated = True
-            except Exception as e:
-                logger.error(f"Failed to activate GuestClient: {e}")
-                raise
+    def _headers(self):
+        return {
+            "Authorization": f"Bearer {config.SOCIALDATA_API_KEY}",
+            "Accept": "application/json",
+        }
+
+    async def _ensure_session(self):
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+
+    async def _api_get(self, url):
+        """Make a GET request to SocialData API."""
+        await self._ensure_session()
+        try:
+            async with self._session.get(url, headers=self._headers()) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                if resp.status == 402:
+                    logger.error("SocialData API: insufficient balance")
+                    return None
+                if resp.status == 429:
+                    logger.warning("SocialData API: rate limited")
+                    return None
+                body = await resp.text()
+                logger.error(f"SocialData API error {resp.status}: {body[:200]}")
+                return None
+        except Exception as e:
+            logger.error(f"SocialData API request failed: {e}")
+            return None
 
     async def analyze(self, username: str) -> ProfileReport:
         """
@@ -77,8 +99,6 @@ class ProfileAnalyzer:
             logger.info(f"Using cached profile for @{username}")
             return self._cache[username.lower()]
 
-        await self._ensure_activated()
-
         report = ProfileReport(username=username)
 
         # Fetch user profile
@@ -87,11 +107,11 @@ class ProfileAnalyzer:
             logger.warning(f"Could not fetch profile for @{username}")
             return report
 
-        report.name = getattr(user_data, 'name', '') or ''
-        report.bio = getattr(user_data, 'description', '') or ''
-        report.followers_count = getattr(user_data, 'followers_count', 0) or 0
-        report.following_count = getattr(user_data, 'following_count', 0) or 0
-        report.verified = getattr(user_data, 'is_blue_verified', False) or False
+        report.name = user_data.get('name', '')
+        report.bio = user_data.get('description', '')
+        report.followers_count = user_data.get('followers_count', 0) or 0
+        report.following_count = user_data.get('friends_count', 0) or 0
+        report.verified = user_data.get('is_blue_verified', False) or False
         report.profile_url = f"https://x.com/{username}"
 
         # Check if this looks like an automated/AI profile
@@ -145,11 +165,11 @@ class ProfileAnalyzer:
             if not user_data:
                 return report
 
-            report.name = getattr(user_data, 'name', '') or ''
-            report.bio = getattr(user_data, 'description', '') or ''
-            report.followers_count = getattr(user_data, 'followers_count', 0) or 0
-            report.following_count = getattr(user_data, 'following_count', 0) or 0
-            report.verified = getattr(user_data, 'is_blue_verified', False) or False
+            report.name = user_data.get('name', '')
+            report.bio = user_data.get('description', '')
+            report.followers_count = user_data.get('followers_count', 0) or 0
+            report.following_count = user_data.get('friends_count', 0) or 0
+            report.verified = user_data.get('is_blue_verified', False) or False
             report.profile_url = f"https://x.com/{username}"
 
         # Score: followers
@@ -183,19 +203,23 @@ class ProfileAnalyzer:
         return report
 
     async def _fetch_profile(self, username: str):
-        """Fetch a user's profile via twikit GuestClient."""
-        try:
-            await self._ensure_activated()
-            user = await self.client.get_user_by_screen_name(username)
-            return user
-        except Exception as e:
-            error_str = str(e).lower()
-            if 'rate' in error_str or '429' in error_str:
-                logger.warning(f"Rate limited while fetching @{username}, re-activating")
-                self._activated = False
-            else:
-                logger.error(f"Error fetching profile for @{username}: {e}")
-            return None
+        """Fetch a user's profile via SocialData API."""
+        url = f"{SOCIALDATA_BASE}/twitter/user/{quote(username)}"
+        return await self._api_get(url)
+
+    async def _get_tweet_by_id(self, tweet_id: str):
+        """Fetch a single tweet by ID via SocialData API."""
+        url = f"{SOCIALDATA_BASE}/twitter/statuses/show?id={tweet_id}"
+        return await self._api_get(url)
+
+    async def _get_user_tweets(self, username: str, count: int = 10):
+        """Fetch recent tweets for a user via SocialData search."""
+        query = quote(f"from:{username}")
+        url = f"{SOCIALDATA_BASE}/twitter/search?query={query}&type=Latest"
+        data = await self._api_get(url)
+        if data and "tweets" in data:
+            return data["tweets"][:count]
+        return []
 
     def _is_likely_automated(self, report: ProfileReport) -> bool:
         """
@@ -209,19 +233,14 @@ class ProfileAnalyzer:
         bio_lower = report.bio.lower()
         name_lower = report.name.lower()
 
-        # Check bio for AI keywords
         bio_has_ai = any(kw in bio_lower for kw in indicators["bio_keywords"])
-
-        # Check name for AI keywords
         name_has_ai = any(kw in name_lower for kw in indicators["name_keywords"])
 
-        # Low followers + AI signals = likely automated
         low_followers = report.followers_count <= indicators["max_followers"]
 
         if low_followers and (bio_has_ai or name_has_ai):
             return True
 
-        # Very strong signals in bio even with moderate followers
         strong_signals = ["ai agent", "autonomous agent", "ai persona", "digital being"]
         if any(s in bio_lower for s in strong_signals):
             return True
@@ -243,16 +262,13 @@ class ProfileAnalyzer:
 
         indicators = config.AI_PROFILE_INDICATORS
 
-        # Try explicit "by @username" patterns first
         for pattern in indicators["parent_patterns"]:
             match = re.search(pattern, bio, re.IGNORECASE)
             if match:
                 parent = match.group(1)
-                # Filter out common non-person handles
                 if parent.lower() not in {'bankrbot', 'twitter', 'x', config.BANKRBOT_USERNAME}:
                     return parent
 
-        # Fallback: find any @mention in bio that isn't bankrbot
         mention_pattern = r'@(\w+)'
         mentions = re.findall(mention_pattern, bio)
         for mention in mentions:
@@ -261,7 +277,7 @@ class ProfileAnalyzer:
 
         return None
 
-    async def _find_parent_from_tweets(self, user_data) -> str | None:
+    async def _find_parent_from_tweets(self, user_data: dict) -> str | None:
         """
         Check the user's pinned tweet and recent tweets for parent account clues.
 
@@ -270,38 +286,37 @@ class ProfileAnalyzer:
         - Regularly mention/reply to the parent account
         """
         try:
-            # Check pinned tweets
-            pinned_ids = getattr(user_data, 'pinned_tweet_ids', None)
-            if pinned_ids:
-                for pin_id in pinned_ids[:2]:  # check up to 2 pinned tweets
-                    try:
-                        pinned = await self.client.get_tweet_by_id(str(pin_id))
-                        if pinned:
-                            text = getattr(pinned, 'text', '') or getattr(pinned, 'full_text', '') or ''
-                            parent = self._find_parent_account(text)
-                            if parent:
-                                return parent
-                    except Exception:
-                        continue
+            screen_name = user_data.get('screen_name', '')
+
+            # Check pinned tweet
+            pinned_id = user_data.get('pinned_tweet_ids_str') or []
+            if isinstance(pinned_id, str):
+                pinned_id = [pinned_id]
+            for pin_id in pinned_id[:2]:
+                try:
+                    pinned = await self._get_tweet_by_id(str(pin_id))
+                    if pinned:
+                        text = pinned.get('full_text') or pinned.get('text', '')
+                        parent = self._find_parent_account(text)
+                        if parent:
+                            return parent
+                except Exception:
+                    continue
 
             # Check recent tweets for frequently mentioned accounts
-            user_id = getattr(user_data, 'id', None)
-            if user_id:
+            if screen_name:
                 try:
-                    tweets = await self.client.get_user_tweets(str(user_id), 'Tweets', count=10)
+                    tweets = await self._get_user_tweets(screen_name, count=10)
                     if tweets:
                         mention_counts = {}
-                        screen_name = getattr(user_data, 'screen_name', '').lower()
                         for tweet in tweets:
-                            text = getattr(tweet, 'text', '') or getattr(tweet, 'full_text', '') or ''
+                            text = tweet.get('full_text') or tweet.get('text', '')
                             mentions = re.findall(r'@(\w+)', text)
                             for m in mentions:
                                 m_lower = m.lower()
-                                if m_lower not in {screen_name, 'bankrbot', config.BANKRBOT_USERNAME}:
+                                if m_lower not in {screen_name.lower(), 'bankrbot', config.BANKRBOT_USERNAME}:
                                     mention_counts[m] = mention_counts.get(m, 0) + 1
 
-                        # If one account is mentioned in 3+ of last 10 tweets,
-                        # it's likely the parent/controller
                         if mention_counts:
                             top = max(mention_counts, key=mention_counts.get)
                             if mention_counts[top] >= 3:
@@ -321,16 +336,15 @@ class ProfileAnalyzer:
                 return points
         return 0
 
-    def _score_engagement(self, user_data) -> int:
+    def _score_engagement(self, user_data: dict) -> int:
         """
         Score based on engagement signals.
         Higher listed_count and statuses_count indicate an active, notable account.
         """
         score = 0
-        listed = getattr(user_data, 'listed_count', 0) or 0
-        statuses = getattr(user_data, 'statuses_count', 0) or 0
+        listed = user_data.get('listed_count', 0) or 0
+        statuses = user_data.get('statuses_count', 0) or 0
 
-        # Listed count (other people adding them to curated lists = endorsement)
         if listed >= 1000:
             score += 10
         elif listed >= 500:
@@ -340,7 +354,6 @@ class ProfileAnalyzer:
         elif listed >= 20:
             score += 2
 
-        # Active account with real tweet history
         if statuses >= 10000:
             score += 5
         elif statuses >= 1000:
@@ -348,7 +361,7 @@ class ProfileAnalyzer:
         elif statuses >= 100:
             score += 1
 
-        return min(score, 15)  # cap engagement score at 15
+        return min(score, 15)
 
     def _score_bio(self, bio: str) -> tuple:
         """Score based on keyword matches in the bio."""

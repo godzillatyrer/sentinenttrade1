@@ -2,7 +2,8 @@
 Twitter Monitor for BankrBot.
 
 Polls @bankrbot's recent tweets for token deployment announcements.
-Uses twikit GuestClient (free, no API key, $0 cost) instead of the paid Twitter API.
+Uses the SocialData API (socialdata.tools) — a reliable paid scraping service
+that costs ~$0.20 per 1,000 tweets (~$5-10/month for our use case).
 
 When a deployment is detected, traces back to the ORIGINAL tweet author —
 the person whose content inspired the coin, not the random person who tagged bankrbot.
@@ -12,12 +13,15 @@ import re
 import logging
 import asyncio
 from datetime import datetime, timezone
+from urllib.parse import quote
 
-from twikit.guest import GuestClient
+import aiohttp
 
 import config
 
 logger = logging.getLogger(__name__)
+
+SOCIALDATA_BASE = "https://api.socialdata.tools"
 
 # Patterns BankrBot uses when announcing deployments
 CA_PATTERN = re.compile(r"0x[a-fA-F0-9]{40}")
@@ -31,38 +35,58 @@ class TwitterMonitor:
         Args:
             on_deployment_detected: async callback(deployment_info: dict)
         """
-        self.client = GuestClient()
         self.on_deployment_detected = on_deployment_detected
         self._seen_tweet_ids = set()
-        self._bankrbot_user_id = None
-        self._activated = False
+        self._session = None
 
-    async def _ensure_activated(self):
-        """Activate the guest client (generates a guest token)."""
-        if not self._activated:
-            try:
-                await self.client.activate()
-                self._activated = True
-                logger.info("twikit GuestClient activated")
-            except Exception as e:
-                logger.error(f"Failed to activate GuestClient: {e}")
-                raise
+    def _headers(self):
+        return {
+            "Authorization": f"Bearer {config.SOCIALDATA_API_KEY}",
+            "Accept": "application/json",
+        }
 
-    async def _get_bankrbot_user_id(self):
-        """Resolve @bankrbot's user ID (cached after first lookup)."""
-        if self._bankrbot_user_id:
-            return self._bankrbot_user_id
+    async def _ensure_session(self):
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
 
-        await self._ensure_activated()
+    async def _api_get(self, url):
+        """Make a GET request to SocialData API. Returns parsed JSON or None."""
+        await self._ensure_session()
         try:
-            user = await self.client.get_user_by_screen_name(config.BANKRBOT_USERNAME)
-            if user:
-                self._bankrbot_user_id = user.id
-                logger.info(f"Resolved @{config.BANKRBOT_USERNAME} -> ID {user.id}")
-                return user.id
+            async with self._session.get(url, headers=self._headers()) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                if resp.status == 402:
+                    logger.error("SocialData API: insufficient balance — top up at socialdata.tools")
+                    return None
+                if resp.status == 429:
+                    logger.warning("SocialData API: rate limited, backing off")
+                    return None
+                body = await resp.text()
+                logger.error(f"SocialData API error {resp.status}: {body[:200]}")
+                return None
         except Exception as e:
-            logger.error(f"Error resolving @{config.BANKRBOT_USERNAME}: {e}")
-        return None
+            logger.error(f"SocialData API request failed: {e}")
+            return None
+
+    async def _get_bankrbot_tweets(self):
+        """Fetch recent tweets from @bankrbot using the search endpoint."""
+        query = quote(f"from:{config.BANKRBOT_USERNAME}")
+        url = f"{SOCIALDATA_BASE}/twitter/search?query={query}&type=Latest"
+        data = await self._api_get(url)
+        if data and "tweets" in data:
+            return data["tweets"]
+        return []
+
+    async def _get_tweet_by_id(self, tweet_id):
+        """Fetch a single tweet by its ID."""
+        url = f"{SOCIALDATA_BASE}/twitter/statuses/show?id={tweet_id}"
+        return await self._api_get(url)
+
+    async def _get_user_profile(self, username):
+        """Fetch a user profile by screen name."""
+        url = f"{SOCIALDATA_BASE}/twitter/user/{quote(username)}"
+        return await self._api_get(url)
 
     async def _trace_original_author(self, tweet):
         """
@@ -76,86 +100,60 @@ class TwitterMonitor:
         We want the Original Author from step 1, not the random caller from step 2.
         """
         current_tweet = tweet
-        max_depth = 5  # prevent infinite loops
+        max_depth = 5
 
         for _ in range(max_depth):
-            reply_to_id = getattr(current_tweet, 'in_reply_to', None)
+            reply_to_id = current_tweet.get("in_reply_to_status_id_str")
             if not reply_to_id:
-                break  # this is the root tweet
-
-            try:
-                parent_tweet = await self.client.get_tweet_by_id(str(reply_to_id))
-                if not parent_tweet:
-                    break
-                current_tweet = parent_tweet
-            except Exception as e:
-                logger.warning(f"Failed to fetch parent tweet {reply_to_id}: {e}")
                 break
 
-        # current_tweet is now the root (or as far back as we could trace)
-        user = getattr(current_tweet, 'user', None)
-        if user:
-            screen_name = getattr(user, 'screen_name', None)
-            return {
-                "username": screen_name,
-                "user_id": getattr(user, 'id', None),
-                "tweet_id": current_tweet.id,
-                "tweet_text": getattr(current_tweet, 'text', '') or getattr(current_tweet, 'full_text', ''),
-                "tweet_url": f"https://x.com/{screen_name}/status/{current_tweet.id}" if screen_name else None,
-            }
+            parent_tweet = await self._get_tweet_by_id(reply_to_id)
+            if not parent_tweet:
+                break
+            current_tweet = parent_tweet
 
-        return {"username": None, "user_id": None, "tweet_id": None, "tweet_text": None, "tweet_url": None}
+        user = current_tweet.get("user", {})
+        screen_name = user.get("screen_name")
+        tweet_id = current_tweet.get("id_str", "")
+        return {
+            "username": screen_name,
+            "user_id": user.get("id_str"),
+            "tweet_id": tweet_id,
+            "tweet_text": current_tweet.get("full_text") or current_tweet.get("text", ""),
+            "tweet_url": f"https://x.com/{screen_name}/status/{tweet_id}" if screen_name else None,
+        }
 
     def _parse_deployment_tweet(self, tweet):
         """Parse a BankrBot tweet to extract deployment info."""
-        tweet_text = getattr(tweet, 'text', '') or getattr(tweet, 'full_text', '') or ''
+        tweet_text = tweet.get("full_text") or tweet.get("text", "")
         text_lower = tweet_text.lower()
 
-        # Check if this tweet is actually a deployment announcement
         is_deployment = any(kw in text_lower for kw in DEPLOYED_KEYWORDS)
         if not is_deployment:
             return None
 
-        # Extract contract address
         ca_match = CA_PATTERN.search(tweet_text)
         contract_address = ca_match.group(0) if ca_match else None
 
-        # Extract ticker
         ticker_match = TICKER_PATTERN.search(tweet_text)
         ticker = ticker_match.group(1) if ticker_match else None
 
+        tweet_id = tweet.get("id_str", "")
         return {
             "source": "twitter",
-            "tweet_id": tweet.id,
+            "tweet_id": tweet_id,
             "tweet_text": tweet_text,
             "contract_address": contract_address,
             "ticker": ticker,
-            "bankrbot_tweet_url": f"https://x.com/{config.BANKRBOT_USERNAME}/status/{tweet.id}",
+            "bankrbot_tweet_url": f"https://x.com/{config.BANKRBOT_USERNAME}/status/{tweet_id}",
             "detected_at": datetime.now(timezone.utc).isoformat(),
         }
 
     async def poll(self):
         """Single poll cycle: fetch recent @bankrbot tweets and check for deployments."""
         logger.info("Polling @bankrbot for new tweets...")
-        await self._ensure_activated()
 
-        user_id = await self._get_bankrbot_user_id()
-        if not user_id:
-            logger.error("Could not resolve BankrBot user ID")
-            return
-
-        try:
-            tweets = await self.client.get_user_tweets(str(user_id), 'Tweets', count=10)
-        except Exception as e:
-            error_str = str(e).lower()
-            if 'rate' in error_str or '429' in error_str:
-                logger.warning("Rate limited, re-activating guest token and backing off")
-                self._activated = False
-                await asyncio.sleep(60)
-                return
-            logger.error(f"Error fetching tweets: {e}")
-            self._activated = False
-            return
+        tweets = await self._get_bankrbot_tweets()
 
         if not tweets:
             logger.info("No tweets returned")
@@ -163,8 +161,8 @@ class TwitterMonitor:
 
         logger.info(f"Fetched {len(tweets)} tweets, checking for deployments...")
         for tweet in tweets:
-            tweet_id = str(tweet.id)
-            if tweet_id in self._seen_tweet_ids:
+            tweet_id = tweet.get("id_str", "")
+            if not tweet_id or tweet_id in self._seen_tweet_ids:
                 continue
             self._seen_tweet_ids.add(tweet_id)
 
@@ -172,8 +170,6 @@ class TwitterMonitor:
             if not deployment:
                 continue
 
-            # Trace back to the original tweet author (the one whose content
-            # inspired the coin — NOT the person who tagged bankrbot)
             original = await self._trace_original_author(tweet)
             deployment["original_author_username"] = original.get("username")
             deployment["original_author_user_id"] = original.get("user_id")
@@ -190,11 +186,10 @@ class TwitterMonitor:
 
     async def run(self):
         """Continuously poll for new deployments."""
-        logger.info("Twitter monitor started (twikit GuestClient — free, no API key)")
+        logger.info("Twitter monitor started (SocialData API)")
         while True:
             try:
                 await self.poll()
             except Exception as e:
                 logger.error(f"Twitter monitor error: {e}")
-                self._activated = False  # re-activate on next poll
             await asyncio.sleep(config.TWITTER_POLL_INTERVAL_SECONDS)
