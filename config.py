@@ -20,6 +20,17 @@ BASE_RPC_URL = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
 BASESCAN_API_KEY = os.getenv("BASESCAN_API_KEY", "")
 INFLUENCE_THRESHOLD = int(os.getenv("INFLUENCE_THRESHOLD", "40"))
 
+# --- Excluded Accounts ---
+# Twitter usernames to ignore (no notifications, no analysis).
+# Set via env var as comma-separated: EXCLUDED_ACCOUNTS=spambot1,scamguy2
+# Or add directly to the list below.
+_excluded_env = os.getenv("EXCLUDED_ACCOUNTS", "")
+EXCLUDED_ACCOUNTS = {
+    name.strip().lower().lstrip("@")
+    for name in _excluded_env.split(",")
+    if name.strip()
+}
+
 # --- BankrBot ---
 BANKRBOT_USERNAME = "bankrbot"
 

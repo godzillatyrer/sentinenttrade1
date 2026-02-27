@@ -77,6 +77,12 @@ async def handle_deployment(deployment: dict, analyzer: ProfileAnalyzer, alerter
         await database.save_alert(deployment_id, 0, False, 0, "No original author found")
         return
 
+    # Check if this account is excluded
+    if username.lower() in config.EXCLUDED_ACCOUNTS:
+        logger.info(f"SKIP: @{username} is in EXCLUDED_ACCOUNTS, ignoring")
+        await database.save_alert(deployment_id, 0, False, 0, f"Excluded account: @{username}")
+        return
+
     # Analyze profile (handles AI/bot detection and parent account tracing)
     logger.info(f"Analyzing original author: @{username}")
     report = await analyzer.analyze(username)
@@ -150,6 +156,8 @@ async def main():
     logger.info("BankrBot Alert System started")
     logger.info(f"Influence threshold: {config.INFLUENCE_THRESHOLD}/100")
     logger.info(f"Key accounts watchlist: {len(config.KEY_ACCOUNTS)} accounts")
+    if config.EXCLUDED_ACCOUNTS:
+        logger.info(f"Excluded accounts: {', '.join(f'@{a}' for a in sorted(config.EXCLUDED_ACCOUNTS))}")
 
     # Create monitors with shared handler
     async def on_deployment(deployment):
